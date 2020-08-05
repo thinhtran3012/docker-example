@@ -1,0 +1,70 @@
+# https://docs.docker.com/compose/gettingstarted/
+# https://docs.docker.com/compose/compose-file/
+version: "3"
+services:
+  consul:
+    build:
+      dockerfile: consul-config/Dockerfile.consul
+      context: .
+    ports:
+      - "8301:8301"
+      - "8301:8301/udp"
+      - "8302:8302"
+      - "8302:8302/udp"
+      - "8500:8500"
+      - "8600:8600"
+      - "8600:8600/udp"  
+    volumes:
+      - /opt/consul-data:/opt/consul-data
+      - ./consul-config/consul-agent.hcl:/etc/consul.hcl
+      - ./consul-config/ca.crt:/etc/consul/ssl/ca.crt
+# we need ca.crt before apply
+    network_mode: host
+    command: agent -datacenter ${CONSUL_AGENT} -retry-join ${CONSUL_IP} -data-dir /opt/consul-data -bind ${LOCAL_IP} -encrypt ${CONSULENCRYPT} -config-file /etc/consul.hcl
+    # command: agent -datacenter asia-southeast-1 -retry-join 10.148.0.35 -data-dir /tmp -bind 10.148.0.113
+    container_name: uiza-consul-component
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500"]
+      interval: 3s
+      timeout: 10s
+      retries: 5
+  worker:
+    build:
+      #dockerfile: Dockerfile.worker
+      dockerfile: ${WORKER_TYPE}
+      context: .
+    ports:
+      - "1935:1935"
+      - "8181:8181"
+    volumes:
+      - ./rclone.conf:/etc/.config/rclone/rclone.conf
+      - ./conf:/opt/openresty/conf
+      - /opt/data:/data
+      - /var/log/nginx:/var/log/nginx
+      - /var/log/uiza-ffmpeg:/var/log/uiza-ffmpeg
+      - ./lua-modules:/opt/openresty/src/lua-modules
+      - ./.env:/opt/openresty/conf/.env
+    network_mode: host
+    container_name: uiza-worker-component
+    depends_on:
+      - consul
+  origin:
+    build:
+      dockerfile: Dockerfile.origin
+      context: .
+    ports:
+      - "8080:8080"
+      - "443:443"
+    volumes:
+      - ./conf:/opt/openresty/conf
+      - /opt/data:/data
+      - /var/log/nginx:/var/log/nginx
+      - /:/opt/rootfs
+      - ./lua-modules:/opt/openresty/src/lua-modules
+      - ./.env:/opt/openresty/conf/.env
+      - ./rclone.conf:/etc/.config/rclone/rclone.conf
+      - ./cronjob.conf:/etc/crond.d/logrotate
+    network_mode: host
+    container_name: uiza-origin-component
+    depends_on:
+      - consul

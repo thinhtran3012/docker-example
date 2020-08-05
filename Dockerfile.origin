@@ -1,0 +1,55 @@
+FROM uizaio/openresty:1.0.0 AS build-openresty
+    
+FROM uizaio/centos:7.6
+ARG LUAROCKS=3.3.1
+
+RUN yum install epel-release -y && \
+    yum install make gcc openssl-devel lua-devel \
+                rclone crontabs unzip git python3 -y && \
+    yum clean all && \
+    rm -rf /var/cache/yum
+
+#install luarocks
+RUN curl -fSL http://luarocks.org/releases/luarocks-${LUAROCKS}.tar.gz -o luarocks-${LUAROCKS}.tar.gz && \
+    tar -xvf luarocks-${LUAROCKS}.tar.gz && rm -f luarocks-${LUAROCKS}.tar.gz && \
+    cd luarocks-${LUAROCKS} && ./configure && make build && make install && make clean && \
+    cd .. && rm -rf luarocks-${LUAROCKS}
+
+RUN luarocks install lua-cjson 2.1.0-1 && \
+    luarocks install lua-json 0.1.3-1 && \
+    luarocks install lua-resty-jwt 0.2.0-0 && \
+    luarocks install lua-resty-env 0.4.0-1 && \
+    luarocks install luaunit 3.3-1 && \
+    luarocks install shell-games 1.1.0-1 && \
+    luarocks install luasocket 3.0rc1-2 && \
+    luarocks install luasec 0.9-1 && \
+    luarocks install lua-resty-http 0.15-0
+
+RUN python3 -m pip install requests
+
+ARG UIZA_SSL=0.2
+RUN curl -fSL https://github.com/uizaio/lua-resty-uiza-ssl/archive/${UIZA_SSL}.tar.gz -o ${UIZA_SSL}.tar.gz && \
+    tar -xvf ${UIZA_SSL}.tar.gz && rm -f ${UIZA_SSL}.tar.gz && \
+    cp -R lua-resty-uiza-ssl-${UIZA_SSL}/lib/resty /usr/local/share/lua/5.1/ && \
+    mkdir -p /etc/resty-uiza-ssl/fallback && \
+    chown nobody /etc/resty-uiza-ssl && \
+    chmod 700 /etc/resty-uiza-ssl && \
+    rm -rf lua-resty-uiza-ssl-${UIZA_SSL}
+
+ADD conf/ssl/fallback /etc/resty-uiza-ssl/fallback
+ADD lua-modules /opt/openresty/src/lua-modules
+COPY --from=build-openresty /usr/local/openresty/ /usr/local/openresty/
+ADD logrotate.conf.origin /etc/logrotate.d/nginx
+ADD start.sh.origin /root/start.sh
+
+RUN chmod 755 -R /opt/openresty/src/**/* && \
+    mkdir -p /etc/.config/rclone && \
+    cd /etc/.config/rclone/ && touch rclone.conf && \
+    chown -R nobody:nobody /etc/.config && \
+    chmod 700 -R /etc/.config/rclone/rclone.conf && \
+    mv /usr/local/openresty/nginx/conf/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf.bak && \
+    rm /usr/local/openresty/nginx/html/index.html && \
+    chmod +x /root/start.sh
+
+EXPOSE 8080 443
+ENTRYPOINT ["/root/start.sh"]

@@ -1,0 +1,62 @@
+FROM uizaio/openresty:1.0.0 AS build-openresty
+
+FROM uizaio/centos:7.6
+ARG LUAROCKS=3.3.1
+
+RUN yum install epel-release -y && \
+    yum install make gcc openssl-devel lua-devel \
+                rclone crontabs unzip git python3 -y && \
+    yum clean all && \
+    rm -rf /var/cache/yum
+
+WORKDIR /opt
+#install luarocks
+ARG LUA_LIB_PATH=/usr/local/lib/lua/5.1
+ARG LUA_SHARE_PATH=/usr/local/share/lua/5.1
+ENV LUA_PATH=./?.lua;${LUA_LIB_PATH}/?.lua;${LUA_LIB_PATH}/?/init.lua;${LUA_SHARE_PATH}/?.lua;${LUA_SHARE_PATH}/?/init.lua;;
+ENV LUA_CPATH=./?.so;${LUA_LIB_PATH}/?.so;${LUA_LIB_PATH}/loadall.so;;
+
+#install luarocks
+RUN curl -fSL http://luarocks.org/releases/luarocks-${LUAROCKS}.tar.gz -o luarocks-${LUAROCKS}.tar.gz && \
+    tar -xvf luarocks-${LUAROCKS}.tar.gz && rm -f luarocks-${LUAROCKS}.tar.gz && \
+    cd luarocks-${LUAROCKS} && ./configure && make build && make install && make clean && \
+    cd .. && rm -rf luarocks-${LUAROCKS}
+
+RUN luarocks install luasocket 3.0rc1-2 && \
+    luarocks install lua-cjson 2.1.0-1 && \
+    luarocks install lua-yaml 1.2-1 && \
+    luarocks install luaposix 34.1.1-1 && \
+    luarocks install lua-resty-jwt 0.2.0-0 && \
+    luarocks install lua-resty-env 0.4.0-1 && \
+    luarocks install lua-resty-http 0.15-0
+
+RUN python3 -m pip install requests && \
+    curl -fSL https://downloads.rclone.org/v1.51.0/rclone-v1.51.0-linux-amd64.rpm -o rclone-v1.51.0-linux-amd64.rpm && \
+    rpm -iUh rclone-v1.51.0-linux-amd64.rpm && \
+    rm -f rclone-v1.51.0-linux-amd64.rpm
+
+RUN mkdir -p /etc/.config/rclone && \
+    cd /etc/.config/rclone/ && \
+    touch rclone.conf && \
+    chown -R nobody:nobody /etc/.config && \
+    chmod 700 -R /etc/.config/rclone/rclone.conf && \
+    mkdir /www
+
+ADD static /www/static
+COPY --from=build-openresty /usr/local/openresty/ /usr/local/openresty/
+#build uiza-ffmpeg
+ADD ./ffmpeg-20200724-0940 /opt/uiza-ffmpeg/uiza-ffmpeg
+ADD ./lua-modules /opt/openresty/src/lua-modules
+ADD ./logrotate.conf.worker /etc/logrotate.d/nginx
+ADD ./crontab.worker /etc/cron.d/crontab.worker
+ADD start.sh.worker /root/start.sh
+
+RUN chmod 755 -R /opt/openresty/src/**/* && \
+    ldconfig && chown -R nobody:nobody /etc/.config && \
+    chmod 700 -R /etc/.config/rclone/rclone.conf && \
+    chmod +x /opt/uiza-ffmpeg/uiza-ffmpeg && \
+    mv /usr/local/openresty/nginx/conf/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf.bak && \
+    chmod +x /root/start.sh
+
+EXPOSE 1935 8181
+ENTRYPOINT ["/root/start.sh"]

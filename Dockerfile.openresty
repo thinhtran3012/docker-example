@@ -1,0 +1,32 @@
+FROM centos:centos7.6.1810
+
+RUN yum install epel-release -y && \
+    yum install pcre-devel openssl-devel gcc patch \
+                perl make libcurl-devel.x86_64 \
+                libxml2-devel.x86_64 -y && \
+    yum clean all && \
+    rm -rf /var/cache/yum
+
+ARG OPENRESTY=1.15.8.1
+WORKDIR ~
+
+#clone openresty: https://openresty.org/en/download.html
+RUN curl https://openresty.org/download/openresty-${OPENRESTY}.tar.gz -o openresty.tar.gz && \
+    tar -xvf openresty.tar.gz && rm -f openresty.tar.gz
+
+ADD ./patches /opt/openresty/src/patches
+ADD ./c-modules/ngx_metric_module /opt/openresty/src/c-modules/ngx_metric_module
+
+ARG PREFIX=/usr
+ARG NGINX_RTMP=2.0.4.8
+#clone nginx-rtmp-module
+RUN curl -fSL https://github.com/uizaio/nginx-rtmp-module/archive/${NGINX_RTMP}.tar.gz -o ${NGINX_RTMP}.tar.gz && \
+    tar -xvf ${NGINX_RTMP}.tar.gz && rm -f ${NGINX_RTMP}.tar.gz
+
+#build openresty with nginx-rtmp module
+RUN cd openresty-${OPENRESTY} \
+    && patch -p0 < /opt/openresty/src/patches/nginx-patches/ngx_log.patch \
+    && patch -p0 < /opt/openresty/src/patches/nginx-patches/ngx_http_request.patch \
+    && ./configure --add-module=/opt/openresty/src/c-modules/ngx_metric_module --add-module=../nginx-rtmp-module-${NGINX_RTMP} --with-pcre-jit --with-stream --with-http_realip_module --with-http_stub_status_module \
+    && make -j2 \
+    && make install

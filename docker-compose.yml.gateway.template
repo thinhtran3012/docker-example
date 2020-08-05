@@ -1,0 +1,49 @@
+# https://docs.docker.com/compose/gettingstarted/
+# https://docs.docker.com/compose/compose-file/
+version: "3"
+services:
+  consul:
+    build:
+      dockerfile: consul-config/Dockerfile.consul
+      context: .
+    ports:
+      - "8301:8301"
+      - "8301:8301/udp"
+      - "8302:8302"
+      - "8302:8302/udp"
+      - "8500:8500"
+      - "8600:8600"
+      - "8600:8600/udp"  
+    volumes:
+      - /opt/consul-data:/opt/consul-data
+      - ./consul-config/consul-agent.hcl:/etc/consul.hcl
+      - ./consul-config/ca.crt:/etc/consul/ssl/ca.crt
+# we need ca.crt before apply
+    network_mode: host
+    command: agent -datacenter ${CONSUL_AGENT} -retry-join ${CONSUL_IP} -data-dir /opt/consul-data -bind ${LOCAL_IP} -encrypt ${CONSULENCRYPT} -config-file /etc/consul.hcl
+    # command: agent -datacenter asia-southeast-1 -retry-join 10.148.0.35 -data-dir /tmp -bind 10.148.0.113
+    container_name: uiza-consul-component
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500"]
+      interval: 3s
+      timeout: 10s
+      retries: 5
+  gateway:
+    build:
+      dockerfile: Dockerfile.gateway
+      context: .
+    ports:
+      - "8181:8181"
+      - "1935:1935"
+    volumes:
+      - ./conf:/opt/openresty/conf
+      - ./conf/nginx-gateway.conf:/opt/openresty/conf/nginx-gateway.conf
+      - /:/opt/rootfs
+      - /var/log/nginx:/var/log/nginx
+      - /var/log/uiza-ffmpeg:/var/log/uiza-ffmpeg
+      - ./lua-modules:/opt/openresty/src/lua-modules
+      - ./.env:/opt/openresty/conf/.env
+    network_mode: host
+    container_name: uiza-gateway-component
+    depends_on:
+      - consul
